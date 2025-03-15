@@ -1,0 +1,72 @@
+/**
+ * For more details on how to configure Wrangler, refer to:
+ * https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+ {
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "linebot-worker",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-02-24",
+	"observability": {
+		"enabled": true
+	},
+  /**
+   * Smart Placement
+   * Docs: https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
+   */
+  // "placement": { "mode": "smart" },
+
+  /**
+   * Bindings
+   * Bindings allow your Worker to interact with resources on the Cloudflare Developer Platform, including
+   * databases, object storage, AI inference, real-time communication and more.
+   * https://developers.cloudflare.com/workers/runtime-apis/bindings/
+   */
+
+  /**
+   * Environment Variables
+   * https://developers.cloudflare.com/workers/wrangler/configuration/#environment-variables
+   */
+  "vars": { 
+    "CHANNEL_ACCESS_TOKEN": "",
+    "CHANNEL_SECRET": "",
+    "LANGCHAIN_CALLBACKS_BACKGROUND": "false",
+    "LANGSMITH_TRACING": "true",
+    "LANGSMITH_TRACING_V2": "true",
+    "LANGSMITH_API_KEY": "",
+    "LANGSMITH_PROJECT": "",
+    "OPENAI_API_KEY": "",
+    "GOOGLE_API_KEY": ""
+  },
+  /**
+   * Note: Use secrets to store sensitive data.
+   * https://developers.cloudflare.com/workers/configuration/secrets/
+   */
+
+  /**
+   * Static Assets
+   * https://developers.cloudflare.com/workers/static-assets/binding/
+   */
+  // "assets": { "directory": "./public/", "binding": "ASSETS" },
+
+  /**
+   * Service Bindings (communicate between multiple Workers)
+   * https://developers.cloudflare.com/workers/wrangler/configuration/#service-bindings
+   */
+  // "services": [{ "binding": "MY_SERVICE", "service": "my-service" }]
+
+  "kv_namespaces": [
+    {
+      "binding": "CHAT_HISTORY",
+      "id": "",
+      "preview_id":""
+    },
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "",
+      "database_id": ""
+    }
+  ]
+}
