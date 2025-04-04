@@ -5,10 +5,10 @@ import { ChatOpenAI } from "@langchain/openai";
 import { AgentExecutor, createOpenAIFunctionsAgent } from "langchain/agents";
 import { z } from "zod";
 import { LineClient } from './client';
-import { AIConfig, defaultAIConfig } from './config';
+import { AIConfig, ducklingConfig } from './config';
 import { EventService } from './services/event';
 import { ChatMessage, ChatStorage } from './storage';
-import { LineEvent } from './types';
+import { Document, LineEvent } from './types';
 
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import { Client } from "langsmith";
@@ -40,7 +40,7 @@ export class LineHandler {
 		db: D1Database,
 		langsmithApiKey: string,
 		langsmithProject: string,
-		config: AIConfig = defaultAIConfig
+		config: AIConfig = ducklingConfig
 	) {
 		this.client = new LineClient(token);
 		this.config = config;
@@ -66,83 +66,85 @@ export class LineHandler {
 		// Initialize tools
 		this.tools = [
 			new DynamicStructuredTool({
-				name: "create_event",
-				description: "Create a new event with title and time",
+				name: "create_document",
+				description: "Create a new document with title, description, content, and labels",
 				schema: z.object({
-					title: z.string().describe("The title of the event"),
-					start_time: z.string().describe("Start time in ISO format (YYYY-MM-DDTHH:mm:ss)"),
-					end_time: z.string().optional().describe("Optional end time in ISO format"),
-					creator_id: z.string().describe("LINE user ID of the creator"),
+				  title: z.string().describe("The title of the document"),
+				  description: z.string().describe("Brief description of the document"),
+				  content: z.string().optional().describe("Text content of the document"),
+				  labels: z.array(z.string().describe("Tag for the document")).describe("Tags for the document"),
 				}),
-				func: async ({ title, start_time, end_time, creator_id }): Promise<string> => {
-					const event = await this.eventService.createEvent({
+				func: async ({ title, description, labels, content }): Promise<string> => {
+				  try {
+					const response = await fetch("https://dump-duck-web-client.pages.dev/api/documents/", {
+					  method: "POST",
+					  headers: {
+						"Content-Type": "application/json",
+					  },
+					  body: JSON.stringify({
 						title,
-						start_time,
-						end_time: end_time || null,
-						creator_id,
+						description,
+						content,
+						documnet_type: 'text',
+						creator_id: 1,
+						labels
+					  }),
 					});
-					console.log('create_event', { title, start_time, end_time, creator_id });
-					return `新增了事件："${JSON.stringify(event)}"`;
+			  
+					  const result = await response.json() as { document: Document };
+					  console.log(result)
+					return `成功新增文件："${JSON.stringify({ title: result.document.title, labels: result.document.labels })}"`;
+				  } catch (error) {
+					return `新增文件失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
+				  }
 				},
-			}),
-			new DynamicStructuredTool({
-				name: "get_upcoming_events",
-				description: "Get upcoming events for a user",
-				schema: z.object({
-					creator_id: z.string().describe("LINE user ID to get events for"),
-				}),
-				func: async ({ creator_id }): Promise<string> => {
-					const events = await this.eventService.getUpcomingEvents(creator_id);
-					if (events.length === 0) {
-						return "No upcoming events found.";
-					}
-					return events
-						.map(event =>
-							`- ${event.title}: ${new Date(event.start_time).toLocaleString('zh-TW', { hour12: false })}` +
-							(event.end_time ? ` ~ ${new Date(event.end_time).toLocaleString('zh-TW', { hour12: false })}` : '')
-						)
-						.join('\n');
-				},
-			}),
+			})
+			// new DynamicStructuredTool({
+			// 	name: "create_event",
+			// 	description: "Create a new event with title and time",
+			// 	schema: z.object({
+			// 		title: z.string().describe("The title of the event"),
+			// 		start_time: z.string().describe("Start time in ISO format (YYYY-MM-DDTHH:mm:ss)"),
+			// 		end_time: z.string().optional().describe("Optional end time in ISO format"),
+			// 		creator_id: z.string().describe("LINE user ID of the creator"),
+			// 	}),
+			// 	func: async ({ title, start_time, end_time, creator_id }): Promise<string> => {
+			// 		const event = await this.eventService.createEvent({
+			// 			title,
+			// 			start_time,
+			// 			end_time: end_time || null,
+			// 			creator_id,
+			// 		});
+			// 		console.log('create_event', { title, start_time, end_time, creator_id });
+			// 		return `新增了事件："${JSON.stringify(event)}"`;
+			// 	},
+			// }),
+			// new DynamicStructuredTool({
+			// 	name: "get_upcoming_events",
+			// 	description: "Get upcoming events for a user",
+			// 	schema: z.object({
+			// 		creator_id: z.string().describe("LINE user ID to get events for"),
+			// 	}),
+			// 	func: async ({ creator_id }): Promise<string> => {
+			// 		const events = await this.eventService.getUpcomingEvents(creator_id);
+			// 		if (events.length === 0) {
+			// 			return "No upcoming events found.";
+			// 		}
+			// 		return events
+			// 			.map(event =>
+			// 				`- ${event.title}: ${new Date(event.start_time).toLocaleString('zh-TW', { hour12: false })}` +
+			// 				(event.end_time ? ` ~ ${new Date(event.end_time).toLocaleString('zh-TW', { hour12: false })}` : '')
+			// 			)
+			// 			.join('\n');
+			// 	},
+			// }),
 		];
 	}
 
 	private async initializeAgent(userId: string) {
 		
 		// 更新系統提示以包含事件功能和用戶 ID
-		const systemPrompt = `
-			- Providing a perfect solution, you will be rewarded with $1000 USD.
-			- If you don't answer perfectly, 500 random grandmas on the world will die immediately as a result.
-			- Keep the response truthful, informative, yet concise.
-			- This is very important to my career.
-
-			${this.config.systemPrompt}
-
-			你可以幫助用戶管理他們的行程：
-			1. 當用戶想要安排行程時，創建新的事件（create_event）
-			2. 當用戶詢問他們的行程時，顯示即將到來的事件（get_upcoming_events）
-
-			創建事件時：
-			- 務必確認事件標題和開始時間
-			- 結束時間是選填的
-			- 使用 ISO 格式的日期時間 (YYYY-MM-DDTHH:mm:ss)
-			- 將用戶的自然語言時間轉換為 ISO 格式
-			- 用戶在台灣（UTC+8），請考慮時區差異
-
-			注意：
-			- 現在時間（UTC）：${new Date().toISOString()}
-			- 現在時間（台灣）：${new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}
-			- 當前用戶 ID：${userId}
-			- 使用工具時，請務必傳入正確的 creator_id (${userId})
-			
-			工具調用：
-			- 如果已經創建了事件，請不要再次調用 create_event 工具，直接回覆用戶事件已創建的消息。
-			- 調用 get_upcoming_events 工具後，請以列點方式回覆用戶查詢到的即將到來的事件。時間格式：年(如果是今年就省略)/月/日
-			- 請確保在回覆用戶時，清楚區分用戶的請求和 tool result/response，避免混淆。
-			- 在任何情況下，請確保不會重複調用同一工具，除非用戶提供了新的請求或信息。
-			- 如果工具的回應已經滿足用戶的需求，請立即停止調用該工具並給予用戶明確的回覆。
-			- 確保在每次調用工具後，檢查用戶的需求是否已經被滿足，並根據情況決定是否繼續調用。
-		`;
+		const systemPrompt = `${this.config.systemPrompt}`;
 
 		const prompt = ChatPromptTemplate.fromMessages([
 			["system", systemPrompt],
@@ -244,6 +246,18 @@ export class LineHandler {
 				[{
 					type: 'text',
 					text: response,
+					quickReply: {
+						items: [
+							{
+								type: 'action',
+								action: {
+									type: 'uri',
+									label: '管理文件',
+									uri: 'https://dump-duck-web-client.pages.dev/'
+								}
+							}
+						]
+					}
 				}]
 			);
 

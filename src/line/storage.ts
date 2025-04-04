@@ -5,7 +5,7 @@ export interface ChatMessage {
 }
 
 export class ChatStorage {
-    private readonly MAX_MESSAGES = 10;  // 增加常數定義
+    private readonly MAX_MESSAGES = 25;  // 增加常數定義
 
     constructor(private kv: KVNamespace) {}
 

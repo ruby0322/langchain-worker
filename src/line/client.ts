@@ -6,7 +6,7 @@ export class LineClient {
 		this.token = token;
 	}
 
-	async replyMessage(replyToken: string, messages: { type: string; text: string }[]) {
+	async replyMessage(replyToken: string, messages: { type: string; text: string; quickReply: { items: { type: string; action: { [k: string]: string } }[] } }[]) {
 		return fetch(`${this.baseUrl}/message/reply`, {
 			method: 'POST',
 			headers: {
