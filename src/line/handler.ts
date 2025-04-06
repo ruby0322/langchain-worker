@@ -5,7 +5,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { AgentExecutor, createOpenAIFunctionsAgent } from "langchain/agents";
 import { z } from "zod";
 import { LineClient } from './client';
-import { AIConfig, ducklingConfig } from './config';
+import { AIConfig, DEFAULT_REPLY_MESSAGE, ducklingConfig, QUICK_REPLY_ITEM } from './config';
 import { EventService } from './services/event';
 import { ChatMessage, ChatStorage } from './storage';
 import { Document, LineEvent } from './types';
@@ -97,6 +97,15 @@ export class LineHandler {
 				  } catch (error) {
 					return `新增文件失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
 				  }
+				},
+			}),
+			new DynamicStructuredTool({
+				name: "get_current_time",
+				description: "Get current time",
+				schema: z.object({
+				}),
+				func: async ({ }): Promise<string> => {
+					return new Date().toLocaleString('zh-TW', { hour12: false });
 				},
 			})
 			// new DynamicStructuredTool({
@@ -190,11 +199,17 @@ export class LineHandler {
 	private async handleChatMessage(history: ChatMessage[], userId: string): Promise<string> {
 		await this.initializeAgent(userId);
 
-		// 轉換所有歷史訊息為 LangChain 格式
-		const messages = this.convertToLangChainMessages(history);
+		 // 尋找最後一次「新增文件」或「取消」的索引
+		const lastCommandIndex = history.map(msg => msg.content).lastIndexOf('新增文件', history.length - 2);
+		const lastCancelIndex = history.map(msg => msg.content).lastIndexOf('取消', history.length - 2);
+		const startIndex = Math.max(lastCommandIndex, lastCancelIndex);
+
+		// 轉換過濾後的歷史訊息為 LangChain 格式
+		const filteredHistory = startIndex === -1 ? history : history.slice(startIndex);
+		const messages = this.convertToLangChainMessages(filteredHistory);
 		const lastMessage = history[history.length - 1].content;
 
-		// 格式化聊天歷史為字串
+		// 格式化過濾後的聊天歷史為字串
 		const chatHistory = messages
 			.slice(0, -1)
 			.map(msg => {
@@ -238,39 +253,36 @@ export class LineHandler {
 			console.log('Retrieved message history count:', history.length);
 
 			// 處理聊天訊息並獲取 AI 回覆
-			const response = await this.handleChatMessage(history, userId);
+			const response = userMessage === '新增文件' || userMessage === '取消' ? (await this.handleChatMessage(history, userId)) : DEFAULT_REPLY_MESSAGE;
 
-			// Reply with AI response
+			const items = [];
+			items.push(QUICK_REPLY_ITEM.MANAGE_DOCS);
+			if (userMessage !== '取消' && userMessage !== '新增文件') {
+				items.push(QUICK_REPLY_ITEM.NEW_DOC);
+				items.push(QUICK_REPLY_ITEM.CANCEL);
+			}
+
 			await this.client.replyMessage(
 				event.replyToken,
 				[{
 					type: 'text',
 					text: response,
 					quickReply: {
-						items: [
-							{
-								type: 'action',
-								action: {
-									type: 'uri',
-									label: '管理文件',
-									uri: 'https://dump-duck-web-client.pages.dev/'
-								}
-							}
-						]
+						items
 					}
 				}]
 			);
 
 			// 保存 AI 回覆
-			console.log('Saving AI response:', {
-				userId: userId,
-				content: response
-			});
-			await this.storage.saveMessage(userId, {
-				role: 'assistant',
-				content: response,
-				timestamp: new Date().toISOString()
-			});
+			// console.log('Saving AI response:', {
+			// 	userId: userId,
+			// 	content: response
+			// });
+			// await this.storage.saveMessage(userId, {
+			// 	role: 'assistant',
+			// 	content: response,
+			// 	timestamp: new Date().toISOString()
+			// });
 		}
 	}
-} 
+}
