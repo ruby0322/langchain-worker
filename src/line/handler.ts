@@ -5,7 +5,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { AgentExecutor, createOpenAIFunctionsAgent } from "langchain/agents";
 import { z } from "zod";
 import { LineClient } from './client';
-import { AIConfig, DEFAULT_REPLY_MESSAGE, ducklingConfig, QUICK_REPLY_ITEM } from './config';
+import { AIConfig, ducklingConfig, getDefaultReplyMessage, QUICK_REPLY_ITEM } from './config';
 import { EventService } from './services/event';
 import { ChatMessage, ChatStorage } from './storage';
 import { Document, LineEvent } from './types';
@@ -93,21 +93,21 @@ export class LineHandler {
 			  
 					  const result = await response.json() as { document: Document };
 					  console.log(result)
-					return `成功新增文件："${JSON.stringify({ title: result.document.title, labels: result.document.labels })}"`;
+					return `成功新增文件："${JSON.stringify({ title: result.document.title, description: result.document.description, labels: result.document.labels })}"`;
 				  } catch (error) {
 					return `新增文件失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
 				  }
 				},
 			}),
-			new DynamicStructuredTool({
-				name: "get_current_time",
-				description: "Get current time",
-				schema: z.object({
-				}),
-				func: async ({ }): Promise<string> => {
-					return new Date().toLocaleString('zh-TW', { hour12: false });
-				},
-			})
+			// new DynamicStructuredTool({
+			// 	name: "get_current_time",
+			// 	description: "Get current time",
+			// 	schema: z.object({
+			// 	}),
+			// 	func: async ({ }): Promise<string> => {
+			// 		return new Date().toLocaleString('zh-TW', { hour12: false });
+			// 	},
+			// })
 			// new DynamicStructuredTool({
 			// 	name: "create_event",
 			// 	description: "Create a new event with title and time",
@@ -205,7 +205,7 @@ export class LineHandler {
 		const startIndex = Math.max(lastCommandIndex, lastCancelIndex);
 
 		// 轉換過濾後的歷史訊息為 LangChain 格式
-		const filteredHistory = startIndex === -1 ? history : history.slice(startIndex);
+		const filteredHistory = startIndex === -1 ? history : history.slice(startIndex+1);
 		const messages = this.convertToLangChainMessages(filteredHistory);
 		const lastMessage = history[history.length - 1].content;
 
@@ -224,7 +224,7 @@ export class LineHandler {
 			chat_history: chatHistory,
 		};
 
-		const result = await this.agent!.invoke(input, { callbacks: [this.tracer] });
+		const result = await this.agent!.invoke(input, { callbacks: [this.tracer], max_tools: 3 });
 		return result.output as string;
 	}
 
@@ -253,7 +253,7 @@ export class LineHandler {
 			console.log('Retrieved message history count:', history.length);
 
 			// 處理聊天訊息並獲取 AI 回覆
-			const response = userMessage === '新增文件' || userMessage === '取消' ? (await this.handleChatMessage(history, userId)) : DEFAULT_REPLY_MESSAGE;
+			const response = userMessage === '新增文件' ? (await this.handleChatMessage(history, userId)) : getDefaultReplyMessage(userMessage);
 
 			const items = [];
 			items.push(QUICK_REPLY_ITEM.MANAGE_DOCS);
