@@ -224,7 +224,7 @@ export class LineHandler {
 			chat_history: chatHistory,
 		};
 
-		const result = await this.agent!.invoke(input, { callbacks: [this.tracer], max_tools: 3 });
+		const result = await this.agent!.invoke(input, { callbacks: [this.tracer] });
 		return result.output as string;
 	}
 
