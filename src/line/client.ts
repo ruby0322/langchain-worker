@@ -46,4 +46,18 @@ export class LineClient {
 		});
 		return response.json();
 	}
-} 
+
+	async startLoading(chatId: string, loadingSeconds: number) {
+		return await fetch(`${this.baseUrl}/chat/loading/start`, {
+			method: 'POST',
+			headers: {
+				'Content-Type': 'application/json',
+				'Authorization': `Bearer ${this.token}`,
+			},
+			body: JSON.stringify({
+				chatId,
+				loadingSeconds,
+			}),
+		});
+	}
+}

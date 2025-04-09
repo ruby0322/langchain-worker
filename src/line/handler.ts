@@ -12,6 +12,13 @@ import { Document, LineEvent } from './types';
 import { LangChainTracer } from "@langchain/core/tracers/tracer_langchain";
 import { Client } from "langsmith";
 
+const DocumentSchema = z.object({
+	title: z.string().describe("The title of the document"),
+	description: z.string().describe("Brief description of the document"),
+	content: z.string().optional().describe("Text content of the document"),
+	labels: z.array(z.string().describe("Tag for the document")).describe("Tags for the document"),
+});
+
 interface MessageAdditionalKwargs {
 	timestamp: string;
 	[key: string]: unknown;
@@ -51,22 +58,17 @@ export class LineHandler {
 			modelName: this.config.modelName,
 		});
 
-		// this.eventService = new EventService(db);
-
-		// You can create a client instance with an api key and api url
 		const client = new Client({
 			apiKey: langsmithApiKey,
 			apiUrl: "https://api.smith.langchain.com",
 		});
 
-		// Initialize the tracer
 		this.tracer = new LangChainTracer({ client, projectName: langsmithProject });
 
-		// Initialize tools
 		this.tools = [
 			new DynamicStructuredTool({
 				name: "create_document",
-				description: "Create a new document with title, description, content, and labels",
+				description: "新增文件用的工具",
 				schema: z.object({
 				  title: z.string().describe("The title of the document"),
 				  description: z.string().describe("Brief description of the document"),
@@ -91,68 +93,17 @@ export class LineHandler {
 					});
 			
 					const result = await response.json() as { document: Document };
-					console.log(result)
-					return `新增成功`;
-					return `新增成功："${JSON.stringify({ title: result.document.title, description: result.document.description, labels: result.document.labels })}"`;
+					return `新增成功："${JSON.stringify({ title: result.document.title, labels: result.document.labels })}"`;
 				  } catch (error) {
 					return `新增失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
 				  }
 				},
 			}),
-			// new DynamicStructuredTool({
-			// 	name: "get_current_time",
-			// 	description: "Get current time",
-			// 	schema: z.object({
-			// 	}),
-			// 	func: async ({ }): Promise<string> => {
-			// 		return new Date().toLocaleString('zh-TW', { hour12: false });
-			// 	},
-			// })
-			// new DynamicStructuredTool({
-			// 	name: "create_event",
-			// 	description: "Create a new event with title and time",
-			// 	schema: z.object({
-			// 		title: z.string().describe("The title of the event"),
-			// 		start_time: z.string().describe("Start time in ISO format (YYYY-MM-DDTHH:mm:ss)"),
-			// 		end_time: z.string().optional().describe("Optional end time in ISO format"),
-			// 		creator_id: z.string().describe("LINE user ID of the creator"),
-			// 	}),
-			// 	func: async ({ title, start_time, end_time, creator_id }): Promise<string> => {
-			// 		const event = await this.eventService.createEvent({
-			// 			title,
-			// 			start_time,
-			// 			end_time: end_time || null,
-			// 			creator_id,
-			// 		});
-			// 		console.log('create_event', { title, start_time, end_time, creator_id });
-			// 		return `新增了事件："${JSON.stringify(event)}"`;
-			// 	},
-			// }),
-			// new DynamicStructuredTool({
-			// 	name: "get_upcoming_events",
-			// 	description: "Get upcoming events for a user",
-			// 	schema: z.object({
-			// 		creator_id: z.string().describe("LINE user ID to get events for"),
-			// 	}),
-			// 	func: async ({ creator_id }): Promise<string> => {
-			// 		const events = await this.eventService.getUpcomingEvents(creator_id);
-			// 		if (events.length === 0) {
-			// 			return "No upcoming events found.";
-			// 		}
-			// 		return events
-			// 			.map(event =>
-			// 				`- ${event.title}: ${new Date(event.start_time).toLocaleString('zh-TW', { hour12: false })}` +
-			// 				(event.end_time ? ` ~ ${new Date(event.end_time).toLocaleString('zh-TW', { hour12: false })}` : '')
-			// 			)
-			// 			.join('\n');
-			// 	},
-			// }),
 		];
 	}
 
 	private async initializeAgent(userId: string) {
 		
-		// 更新系統提示以包含事件功能和用戶 ID
 		const systemPrompt = `${this.config.systemPrompt}`;
 
 		const prompt = ChatPromptTemplate.fromMessages([
@@ -204,36 +155,31 @@ export class LineHandler {
 		const lastCancelIndex = history.map(msg => msg.content).lastIndexOf('取消', history.length - 2);
 		const startIndex = Math.max(lastCommandIndex, lastCancelIndex);
 
-		// 轉換過濾後的歷史訊息為 LangChain 格式
 		const filteredHistory = startIndex === -1 ? history : history.slice(startIndex+1);
 		const messages = this.convertToLangChainMessages(filteredHistory);
-		const lastMessage = history[history.length - 1].content;
 
-		// 格式化過濾後的聊天歷史為字串
-		const chatHistory = messages
-			.slice(0, -1)
-			.map(msg => {
-				const role = msg instanceof HumanMessage ? "Human" : "Assistant";
-				return `${role}: ${msg.content}`;
-			})
-			.join("\n");
-
-		// 使用 agent 處理訊息
 		const input: AgentInput = {
 			input: messages.map(msg => msg.content).join("\n"),
 			// chat_history: chatHistory,
 		};
 
 		const result = await this.agent!.invoke(input, { callbacks: [this.tracer] });
-		return result.output as string;
+		let response = result.output as string;
+
+		return response;
 	}
 
 	async handleMessage(event: LineEvent) {
+		if (event.source && event.source.type === 'user') {
+			await this.client.startLoading(event.source.userId as string, 10);
+		} else if (event.source && event.source.type === 'group') {
+			await this.client.startLoading(event.source.groupId as string, 10);
+		}
 		if (event.type === 'message' &&
 			event.message?.type === 'text' &&
 			event.replyToken &&
 			event.source?.userId) {
-
+				
 			const userId = event.source.userId;
 			const userMessage = event.message.text;
 
@@ -272,17 +218,6 @@ export class LineHandler {
 					}
 				}]
 			);
-
-			// 保存 AI 回覆
-			// console.log('Saving AI response:', {
-			// 	userId: userId,
-			// 	content: response
-			// });
-			// await this.storage.saveMessage(userId, {
-			// 	role: 'assistant',
-			// 	content: response,
-			// 	timestamp: new Date().toISOString()
-			// });
 		}
 	}
 }
