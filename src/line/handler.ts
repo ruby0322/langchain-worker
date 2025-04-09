@@ -6,7 +6,6 @@ import { AgentExecutor, createOpenAIFunctionsAgent } from "langchain/agents";
 import { z } from "zod";
 import { LineClient } from './client';
 import { AIConfig, ducklingConfig, getDefaultReplyMessage, QUICK_REPLY_ITEM } from './config';
-import { EventService } from './services/event';
 import { ChatMessage, ChatStorage } from './storage';
 import { Document, LineEvent } from './types';
 
@@ -20,7 +19,7 @@ interface MessageAdditionalKwargs {
 
 interface AgentInput {
 	input: string;
-	chat_history: string;
+	chat_history?: string;
 }
 
 export class LineHandler {
@@ -29,7 +28,7 @@ export class LineHandler {
 	private config: AIConfig;
 	private storage: ChatStorage;
 	private chatModel: ChatOpenAI;
-	private eventService: EventService;
+	// private eventService: EventService;
 	private tracer: LangChainTracer;
 	private tools: DynamicStructuredTool<any>[];
 
@@ -52,7 +51,7 @@ export class LineHandler {
 			modelName: this.config.modelName,
 		});
 
-		this.eventService = new EventService(db);
+		// this.eventService = new EventService(db);
 
 		// You can create a client instance with an api key and api url
 		const client = new Client({
@@ -77,25 +76,26 @@ export class LineHandler {
 				func: async ({ title, description, labels, content }): Promise<string> => {
 				  try {
 					const response = await fetch("https://dump-duck-web-client.pages.dev/api/documents/", {
-					  method: "POST",
-					  headers: {
-						"Content-Type": "application/json",
-					  },
-					  body: JSON.stringify({
-						title,
-						description,
-						content,
-						documnet_type: 'text',
-						creator_id: 1,
-						labels
-					  }),
+						method: "POST",
+						headers: {
+							"Content-Type": "application/json",
+						},
+						body: JSON.stringify({
+							title,
+							description,
+							content,
+							documnet_type: 'text',
+							creator_id: 1,
+							labels
+						}),
 					});
-			  
-					  const result = await response.json() as { document: Document };
-					  console.log(result)
-					return `成功新增文件："${JSON.stringify({ title: result.document.title, description: result.document.description, labels: result.document.labels })}"`;
+			
+					const result = await response.json() as { document: Document };
+					console.log(result)
+					return `新增成功`;
+					return `新增成功："${JSON.stringify({ title: result.document.title, description: result.document.description, labels: result.document.labels })}"`;
 				  } catch (error) {
-					return `新增文件失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
+					return `新增失敗：${error instanceof Error ? error.message : '未知錯誤'}`;
 				  }
 				},
 			}),
@@ -157,7 +157,7 @@ export class LineHandler {
 
 		const prompt = ChatPromptTemplate.fromMessages([
 			["system", systemPrompt],
-			["system", "Previous conversation history:\n{chat_history}"],
+			// ["system", "Previous conversation history:\n{chat_history}"],
 			["human", "{input}"],
 			["human", "{agent_scratchpad}"],
 		]);
@@ -220,8 +220,8 @@ export class LineHandler {
 
 		// 使用 agent 處理訊息
 		const input: AgentInput = {
-			input: lastMessage,
-			chat_history: chatHistory,
+			input: messages.map(msg => msg.content).join("\n"),
+			// chat_history: chatHistory,
 		};
 
 		const result = await this.agent!.invoke(input, { callbacks: [this.tracer] });
